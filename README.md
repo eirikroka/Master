@@ -52,7 +52,7 @@ Learning outcomes:
 - Structuring Python applications for visualization and user interaction
 
 Comments:
-A fun course with a stressfull exam. I have later used this knowledge to build an app, *which is also available on my GitHub.*
+A fun course with a stressfull exam. I have later used this knowledge to build an app, which is also available on my GitHub: *https://github.com/eirikroka/Football-Sim*.
 
 ## Projects
 
@@ -64,7 +64,7 @@ Grade: A
 Average grade: B
 
 Project summary:
-We wrote a research paper analyzing whether merger arbitrage strategies produced higher returns than the S&P 500 in the U.S. market from 2010 to 2022
+We wrote a research paper analyzing whether merger arbitrage strategies produced higher returns than the S&P 500 in the U.S. market from 2010 to 2022.
 
 Main findings:
 - Total returns were lower than the S&P 500
@@ -100,50 +100,3 @@ Main findings:
 - It was possible to earn a consistent profit from Asian Handicap betting in the Premier League during the pandemic, while no other period or market showed similar robustness.
 
 Comments:
-
-
-
-
-
-
-
-
-
-Schooll Exams:
-
-* BAN400: R Programming for Data Science:
-*   Grade : A, proportion A this year:
-*   Learnings outcomes: Gotten really vell versed in R, and the tidyverse universe
-*   Thoughts: This was a fantasic subject, i really like it, and this course help me in finding out that i want to work with coding and hopefully data science in the furture
-
-* BAN404: Statcial Learing:
-* Grade : A, proportion A this year:
-* Learning outcomes: We learned a lot of machine learning methods, like Support Vector Machine, K-nearst neigbour, Random Forest and so on. 
-* Thoughts: Intereserting subject, something i want to learn more about and hopefully use in later in job and so on.
-  
-* BAN438: Application Development in Python
-* Grade : B, proportion A this year:
-* Learning outcomes: Use of python to build visuled in DASH, it similar to other visualing "verktøy" like Shiny and Flask
-* Thoughts: Fun course, and a very stressfull exam, used this knowledge to make an app, I have it her on my GitHub. 
-
-Projects:
-
-* FIN11: Trading and Market Microstructure
-* Grade : A, proportion A this year:
-* Short about the paper: We wrote a paper where we analysed if you earn more money on merger arbitrage than in the SP500 in the US.
-* We found the total return to be worse than the US, but that the sharp ratio was much better. 
-* Thoughts:This course was actuall in my bachelors degree, but I have included it her since it was my first real introduction to coding.
-*  This course was super challeging, I used eqaully much time on this course than the three other subjects combined. It felt like we wrote a bachelore thesis in a 7,5 ECTS subject, 
-*   the project was done by a team of 4, but i did all the coding and i didn't know a thing about it before it and
-*    i rember tyring to use chat but chat was so bad at the time at it could not help me.
-* 
-
-* ENE434: Energy Indusrty Analytics
-* Grade : A, proportion A this year:
-* Short about the paper: We used classification methods learned in BAN404, to try to categorise 7 days into future on wheter the electricty prices in Bergen (NO5) where higly volatile or not,
-* based on historical prices, wheter and water magsins.
-* Thoughts: Funny to try to use the methods used in BAN404, to try and do predictions, learned that data quality is very important.
-
-* 
-* 
-* 
