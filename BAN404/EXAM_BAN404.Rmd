@@ -1,0 +1,569 @@
+---
+title: "exam_25"
+output: pdf_document
+date: "2025-06-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Task 1
+
+## a)
+
+```{r}
+# X is a n x p matrix with data
+# y is an n x 1 vector with data
+
+f <- function(b1, X, y, la) {
+  fval <- sum((y - X %*% b1)^2) + la * sum(b1^2) # This part calculates the
+  # sum of the y vector minus the X (n x p) matrix times (p x 1) vector
+  # b1 (the beta coeffcient(coeff)) of different predictors) and 
+  # the last part is a "la" a lambda that is multiplied with the coeff^
+  # la acts as a penalty, since we in the g fucntion want 
+  # to minimize the fval
+  return(fval)  
+}
+
+g <- function(X, y, la) {
+  q <- ncol(X) # The number of predictors
+  b0 <- mean(y) # the average of y
+  yd <- y - b0 # y after adjusting for the mean(y)
+  Xd <- X # storing the variable X in another variable
+  for (k in 1:q) Xd[, k] <- X[, k] - mean(X[, k]) 
+  # demeaning the X and storing as Xd
+  b1start <- rep(0, q) # Q is the number of predictors
+  opt <- nlminb(b1start, f, X = Xd, y = yd, la = la)
+  # nlmnib is a optimization function using the function f, 
+  # the adjusted Xd, yd and la.
+  # The objective is to minimize the function.
+  b1 <- opt$par # Returns the best set of parameters, or beta coeff.
+  return(b1)
+}
+```
+
+This is a very close version of a ridge regression. Normally you scale the variables for ridge regression, I see that is not done here, and I am not surprised if the optimization method "PORT" is somewhat different than in the normal ridge regression.
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+## b)
+
+```{r message=TRUE, warning=FALSE}
+Xy <- read_csv2("data_task1.csv")
+
+X <- as.matrix(Xy[, -1])
+
+y <- as.matrix(Xy[, 1])
+```
+
+```{r}
+model_lm <- lm(y ~ X)
+
+model_g100 <- g(X, y, 100)
+
+model_g0 <- g(X, y, 0)
+
+
+coef(model_lm)
+model_g0
+
+model_g100
+
+model_g0 - model_g100
+```
+
+The beta coeffcient(coeff) of the lm model is quite similar to the beta coeff from the g-function when the la = 0. There are some differences but these are so small that we can ignore this.
+
+The beta coeffs from g-function with la = 100, however is somewhat different since the shrinkage of the la is applied.
+
+The reason for the difference is "la". It is the shrinkage penalty that reduces the beat coeffs.
+
+## c)
+
+```{r}
+loo <- function(la, X, y) {
+  n <- nrow(X) # Number of obs in each predictor from X
+  q <- ncol(X) # Number of predictors in X
+  b0 <- mean(y) # The average of Y
+  yd <- y - b0 # y minus the average of y
+  Xd <- X # Xd variable a replica of X
+  for (k in 1:q) Xd[, k] <- X[, k] - mean(X[, k]) # Adjust the X predictors for 
+  # the average of each predictor
+    ydpred <- matrix(0, n, 1) # A empty vector with length(n)
+  for (i in 1:n)
+  {
+    b1 <- g(X = X[-i, ], y = y[-i], la) # Finds the coeff with the g-function, 
+    # and excludes the test data 
+    ydpred[i] <- Xd[i, ] %*% b1 # Multiplies with the Xd to predict the y, 
+    # with the new data of the test data
+  }
+  testMSE <- mean((yd - ydpred)^2) # Calculates the MSE as a metric of how good 
+  # the prediction are on average across all predictions. 
+  return(testMSE)
+}
+```
+
+The function above is a leave one out cross validation for the g function.
+
+What about the Xd?
+
+OLS is scale equivariant, so there is a direct correlation between a X and the beta coeff. If you where to multiply X_i with a constant c, the beta coeff will be directly reduced by 1/c.
+
+However then we are working with ridge and lasso regression the model is sensitive to size of the beta coeff. This is caused by the shrinkage penalty since it does not have the same interaction with the beta coeff and X as a OLS. There is also a possibility that the beta coeff to a given predictor in lasso and rigde regression might even be affected by other predictors scaling. Therefore one need to scale and center the predictors to get a correct penalty. The X demean is a way to center the variable, however not as good as a fully scaled X.
+
+```{r}
+
+la_index <- c(0.1, 1, 10, 100, 1000, 10000, 100000)
+
+mse_values <- sapply(la_index, function(lambda){
+  loo(la = lambda, X, y)
+})
+
+min_mse <- which.min(mse_values)
+la_index[min_mse]
+
+plot(mse_values, type = "l")
+
+```
+
+The optimal "la" seems to be somewhere around 10 000.
+
+## d)
+
+```{r}
+
+set.seed(123)
+
+boot <- function(x, n_rep) {
+  s2_values <- numeric(n_rep) 
+  
+  for (i in 1:n_rep) {
+    n <- length(x)
+    
+    values <- sample(x, n, replace = TRUE)
+    m <- mean(values)
+  
+    s2_values[i] <- (1/(n - 1))* sum((values - m)^2)
+  }
+  
+  return(s2_values)
+}
+
+
+boot_s2 <- boot(y, 1000)
+
+hist(boot_s2)
+
+low_boot_s2 <- quantile(boot_s2, 0.025)
+high_boot_s2 <- quantile(boot_s2, 0.975)
+
+
+cbind(low_boot_s2, high_boot_s2)
+
+sd(y)^2
+```
+
+The bootstrap method give a 95% confidence interval of the variance of y to be (1516579, 2137712). This seems to be correct taking into account that the Var(y) is 1846096, right between the lower and higher end of the confidence interval.
+
+## e)
+
+Since the task asks for MSE training results, I will work with the whole dataset. There is no need to have out of sample data.
+
+First we are looking for variables that do not have a linear relationships to y. We do that by plotting the different predictors against y.
+
+```{r}
+par(mfrow = c(2,3))
+
+plot(y ~ ., data = Xy)
+
+```
+
+There do not seem to any clear links between X and y. X3 seems somewhat promising since it seems to be a sinus function. We will try that.
+
+```{r message=FALSE, warning=FALSE}
+library(gam)
+
+g3 <- gam(y ~ s(X3) , data = Xy)
+
+plot(g3)
+
+summary(g3)
+
+pred_g3 <- predict(g3)
+
+mse_g3 <- mean((y - pred_g3)^2)
+
+pred_lm <- predict(model_lm)
+
+mse_lm <-  mean((y - pred_lm)^2)
+
+cbind(mse_lm, mse_g3)
+```
+
+The g3 model do preform bad compared to the lm. Lets try it with all the other predictors, when they are linear.
+
+```{r}
+gl3 <- gam(y ~ . -X3 + s(X3), data = Xy)
+
+pred_gl3 <- predict(gl3)
+
+mse_gl3 <- mean((y - pred_gl3)^2)
+
+cbind(mse_lm, mse_g3, mse_gl3)
+```
+
+Now "gl3" preforms better than the linear model.
+
+Lets look at the summary of "model_lm" to see if some of the predictors have high p-values. Maybe a model are better if we make them a include them as s() in gam.
+
+```{r}
+summary(model_lm)
+```
+
+I choose all variables with higher than 0.5 p-value.
+
+```{r}
+gsome <- gam(y ~ . + s(X2) + s(X6) + s(X12) + s(X13) + s(X17) + s(X19)
+           -X2 -X6 -X12 -X13 -X17 -X19, data = Xy)
+
+pred_gsome <- predict(gsome)
+
+mse_gsome <- mean((y - pred_gsome)^2)
+
+cbind(mse_lm, mse_g3, mse_gl3, mse_gsome)
+```
+
+Lets try every predictor since, no predictor do have a true linear relationships with y.
+
+```{r}
+library(gam)
+
+gall <- gam(y ~ 
+               s(X1) + s(X2) + s(X3) + s(X4) + s(X5) + s(X6) + s(X7) +
+               s(X8) + s(X9) + s(X10) + s(X11) + s(X12) + s(X13) +
+               s(X14) + s(X15) + s(X16) + s(X17) + s(X18) + s(X19) +
+               s(X20), data = Xy)
+
+
+pred_gall <- predict(gall)
+
+mse_gall <- mean((y - pred_gall)^2)
+
+cbind(mse_lm, mse_g3,  mse_gl3, mse_gsome, mse_gall)
+
+```
+
+"gall" preforms much better than the other models.
+
+To calculate the R\^2 we need some basic knowledge.
+
+Number 1: MSE = RSS/n
+
+Number 2: R\^2 = 1 - (RSS/TSS)
+
+Number 3: TSS = the sum of (y_i - mean of y)\^2
+
+```{r}
+mean_y <- mean(y)
+tss <- sum((y - mean_y)^2)
+n <- length(y)
+
+r2_lm <- 1 - (mse_lm * n/tss)
+model_lm_s <- summary(model_lm)
+cbind(r2_lm, model_lm_s$r.squared)
+
+r2_g3 <- 1 - (mse_g3 * n/tss)
+
+r2_gl3 <- 1 - (mse_gl3 * n/tss)
+
+r2_gsome <- 1 - (mse_gsome * n/tss)
+
+r2_gall <- 1 - (mse_gall * n/tss)
+
+cbind(r2_lm, r2_g3, r2_gl3, r2_gsome, r2_gall)
+
+```
+
+The gam model with all predictors as a gam is the best preforming. With a R\^2 equal to ca 80%. However this is not a adj R\^2, so we lack the penalty for many predictors, so the adj R\^2 might be much lower.
+
+There is a strong possibility that "gall" is very overfit with low bias and high variance. We have done no work to validate that it is a good prediction model.
+
+# Task 2
+
+## a)
+
+```{r}
+library(insuranceData)
+
+data("dataOhlsson")
+
+ydata <- dataOhlsson
+ydata$claim <- ydata$antskad >= 1
+
+str(ydata)
+
+factor_columns <- c("kon", "zon", "mcklass", "bonuskl")
+ydata[factor_columns] <- lapply(ydata[factor_columns], as.factor)
+
+```
+
+"zon" is defined as a factor since it is a class on Swedish regions.
+
+"mcklass" is the classification of different "EV ratios" that takes into account the ration between the power of MC and the weight of the MC.
+
+"bonuskl" is defines as a factor since it represent what class of bouns insurance scheme they are a part of. The longer without accidents, the higher value.
+
+```{r}
+ydata$antskad <- NULL
+ydata$skadkost <- NULL
+
+```
+
+I have to remove "antskad" and "skadkost" from the data since they are directly linked to the "claim" variable.
+
+I argue for keeping the "bonuskl" predictor since it is more a measure of how long one have been without a claim rather than a metric on if a claim have happend.
+
+```{r}
+table(ydata$claim)
+sum(ydata$claim / nrow(ydata))
+
+```
+
+It is interesting that there is such a big skew to False. Around 1% have had a claim.
+
+I split the data since the task clearly states that you should do that.
+
+```{r}
+set.seed(123)
+
+ind <- sample(1:nrow(ydata), size = floor(nrow(ydata) / 2))
+
+train <- ydata[ind, ]
+test <- ydata[-ind, ]
+
+```
+
+```{r message=FALSE, warning=FALSE}
+# This is a fast aggregation of plots and summaries of 
+# the predictors relationships to "claim"
+
+train <- train %>% 
+  mutate(claimT = ifelse(claim == T, 100, 0), 
+         # Using 100 here such that I get numbers in "%" in s_list.
+         claim = as.factor(claim)) 
+
+numeric_cols <- sapply(train, is.numeric)
+numeric_cols["calimT"] <- F
+
+factor_cols <- sapply(train, function(col) is.factor(col) || is.character(col))
+factor_cols["claim"] <- F  
+
+
+plot_list <- list()
+
+# Boxplots for numeric columns
+for (colname in names(train)[numeric_cols]) {
+  p <- ggplot(train, aes(x = claim, y = .data[[colname]], color = claim)) +
+  geom_boxplot() +
+  labs(title = paste("Boxplot of", colname), x = "claim", y = colname)
+  
+  plot_list[[length(plot_list) + 1]] <- p
+}
+
+
+library(gridExtra)
+library(grid)
+
+grid_list <- list()
+
+for (i in seq(1, length(plot_list), by = 2)) {
+  grid_obj <- arrangeGrob(
+  grobs = plot_list[i:min(i + 1, length(plot_list))],
+  ncol = 2
+)
+  grid_list[[length(grid_list) + 1]] <- grid_obj
+}
+
+s_list <- list()
+
+for (colname in names(train)[factor_cols]) {
+  s_list[[colname]] <- tapply(train$claimT, train[[colname]], mean, na.rm = T)
+}
+```
+
+```{r}
+grid.newpage()
+grid.draw(grid_list[[1]])
+
+grid.newpage()
+grid.draw(grid_list[[2]])
+
+s_list
+
+```
+
+Based on the plots and the average amount of claims in each category in the factor columns where the data is presented in %, there is no clear predictor that should not be included. All predictor seems useful, for example the sex, there the male is ca 100% more likely to have a claim than a female.
+
+## b)
+
+```{r}
+train$claimT <- NULL
+
+model_log_all <- glm(claim ~ ., data = train, family = binomial())
+
+summary(model_log_all)
+```
+
+Based on the knowledge of the logistic regression with all predictors, I now remove "bonuskl" and "mcklass". Those where the least helpful in the last model.
+
+```{r}
+
+model_log_some <- glm(claim ~ . -bonuskl -mcklass,
+                      data = train, 
+                      family = binomial())
+
+summary(model_log_some)
+```
+
+## c)
+
+```{r message=FALSE, warning=FALSE}
+library(pROC)
+
+prob_all <- predict(model_log_all, newdata = test, type = "r")
+
+roc_all <- roc(test$claim, prob_all)
+
+plot(roc_all)
+
+auc_all <- auc(roc_all)
+
+
+prob_some <- predict(model_log_some, newdata = test, type = "r")
+
+roc_some <- roc(test$claim, prob_some)
+
+plot(roc_some)
+
+auc_some <- auc(roc_some)
+
+cbind(auc_all, auc_some)
+
+```
+
+"model_log_all" preforms better than "model_log_some" with the metric area under curve(AUC).
+
+Based on the ROC for both "all" and "some" logistic regression there is no clear threshold to choose. One could try to optimize based on accuracy, however that will skew very hard against "False" since 99% of all obs are that, so that will cause the model to have a threshold close to 1.
+
+The question more about what do we want to predict. Do we want to be cautions, such that our true positive is high together with high false positive, or do we want high true negative with all actual true positive classified as negative?
+
+I think we rather want a high true positive, than a low one, because that is where the risk is for these insurance companies. They already know that 99% of the customers do not claim the insurance.
+
+```{r}
+pred_all <- prob_all > 0.5
+prop.table(table(test$claim, pred_all), margin = 1)
+
+```
+
+50% is a terrible threshold at true positive.
+
+```{r}
+pred_all <- prob_all > 0.1
+prop.table(table(test$claim, pred_all), margin = 1)
+
+pred_all <- prob_all > 0.01
+table(test$claim, pred_all)
+prop.table(table(test$claim, pred_all), margin = 1)
+
+```
+
+Threshold 0.01 seems to be quite good, however very many is placed in the false positive bucket. Let's try some numbers between 0.01 and 0.1
+
+```{r}
+pred_all <- prob_all > 0.05
+table(test$claim, pred_all)
+
+pred_all <- prob_all > 0.02
+table(test$claim, pred_all)
+prop.table(table(test$claim, pred_all), margin = 1)
+```
+
+0.02 seems to be a good threshold, this at least have identified 50% of the actual positive cases.
+
+```{r}
+pred_some <- prob_some > 0.02
+
+table(test$claim, pred_all)
+prop.table(table(test$claim, pred_all), margin = 1)
+
+```
+
+As a metric for comparing the different models I will use the AUC value gotten from the ROC. The reason for this is that the AUC takes into account the different threshold levels and we have a trade off between true positive rate and true negative rate. Since both are "Rates" the absolute number of False is not a problem.
+
+```{r}
+cbind(auc_all, auc_some)
+```
+
+The logistic regression with all predictors seems the best. However they where equally good at the confusion matrix with the threshold 0.02
+
+## d)
+
+```{r message=FALSE, warning=FALSE}
+library(randomForest)
+
+model_rf <- randomForest(claim ~ ., data = train, ntree = 50, mtry = 3)
+
+prob_rf <- predict(model_rf, newdata = test, type = "prob")
+
+prob_rf <- prob_rf[,2] 
+
+rf <- roc(test$claim, prob_rf)
+
+plot(rf)
+
+auc_rf <- auc(rf)
+
+cbind(auc_all, auc_some, auc_rf)
+
+```
+
+Random forest did worse than the logistic regression.
+
+Ntree is 50 to keep the code faster. One could use cross validation to find an optimal mtry, mtry = 3 might not be optimal.
+
+A note, the ROC plot seems very strange, it is a straight line from the middle and out.
+
+## e)
+
+```{r message=FALSE, warning=FALSE}
+library(gbm)
+train$claim1 <- ifelse(train$claim == T, 1, 0)
+
+model_boost <- gbm(claim1 ~ . - claim,
+                   data = train,
+                   distribution = "bernoulli",
+                   n.trees = 500,
+                   interaction.depth = 4,
+                   shrinkage = 0.01
+                    )
+
+prob_boost <- predict(model_boost, newdata = test, n.trees = 500,
+                      type = "response")
+
+boost <- roc(test$claim, prob_boost)
+
+plot(boost)
+
+auc_boost <- auc(boost)
+
+cbind(auc_all, auc_some, auc_rf, auc_boost)
+```
+
+With the AUC value as the metric the boosting model did the best, just beating the logistic regression with all predictors.
+
+You could use cross validation with different n.trees, interaction.depth, shrinkage to optimize the boosting further, that might increase the AUC value.
+
+NB: We cannot conclude that boosting is better logistic regression since they are very close and we have some randomness included, for example through set.seed in the split. A another split might cause another model to be better, and I would expect the models to quite sensitive to the distribution of Claim == TRUE in the training and test data.

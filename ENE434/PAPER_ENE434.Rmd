@@ -1,0 +1,1039 @@
+---
+title: "Ene434"
+output: pdf_document
+date: "2025-05-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+```
+Candidate numbers: 12 & 21
+
+
+# Introduction
+
+Norway’s open electricity market faces several key challenges, with price volatility being one of the most significant. As Sheybanivaziri et al. (2024, pp. 2–3) note, the market is highly sensitive to fluctuations in demand, supply, and a range of external factors. Due to the low price elasticity of electricity, prices tend to closely follow shifts in supply, which is inherently volatile (Lijesen, 2007). This volatility is largely driven by weather dependent hydropower production and further amplified by Norway’s interconnectedness with the broader European power market. This has inspired our study, in which we aim to explore the use of machine learning to predict future volatility in the power market.
+
+Our main research question is as follows:
+*To what extent can a classification model, using historical electricity prices, weather data, and calendar based variables, accurately predict whether price volatility in Norway’s NO5 bidding zone will be high or low on a target day exactly seven days ahead?*
+
+The Norwegian electricity market has long been recognized for its provision of cheap, clean, and reliable power. However, in recent years, structural changes in electricity supply logistics combined with increased global uncertainty have led to higher levels of price volatility (Sheybanivaziri et al., 2024, pp. 2-3). Through this project, we aim to assist producers and hedgers in planning by forecasting price spikes and high volatility periods. By using classification and machine learning techniques, we seek to predict whether the day ahead market (specifically, seven days into the future) will experience high price volatility. This will provide market participants with a practical tool for operational and financial decision making, delivered through a predictive binary classification model for the NO5 region in Norway.
+
+# Background
+
+### Volatility forecasting
+
+Volatility forecasting plays a key role in risk management and various strategic decisions. For instance, if high volatility periods can be predicted, hedging strategies can be timed more effectively using forward or options contracts. As mentioned by Sheybanivaziri et al. (2024, pp. 2-3), high volatility leads to greater price uncertainty and risk, which can affect market margins and the value for hedgers.
+
+This is particularly relevant in the Norwegian power market, which relies heavily on natural resources such as hydropower. Improved forecasting may help optimize the use of water reservoirs. Sheybanivaziri et al. (2024, pp. 2-3) argue further that Norway’s spot prices have become increasingly dependent on imports and weather conditions, indicating greater volatility than in previous years.
+
+Greater volatility can lead to larger forecasting errors, increasing the risk of unnecessary costs, and affecting especially low margin contracts. Moreover, large consumers and retailers can benefit from volatility forecasts, as such information helps assess price risks and adjust procurement strategies accordingly (Zareipour et al., 2011, pp. 165-166).
+
+While forecasting exact prices may seem more intuitive, research suggests that forecasting volatility may yield more accurate and actionable insights. Sheybanivaziri et al. (2024, p. 4) indicate that although forecasts often perform well on average, machine learning and probabilistic approaches tend to outperform during highly volatile conditions.
+
+### Binary classification approach (Literature review)
+
+Whereas traditional volatility studies often rely on time series- or GARCH-type models to estimate continuous values, this paper adopts a classification based approach to predict future volatility. Specifically, we aim to forecast whether future price volatility will exceed a predefined value threshold, turning the problem into a binary classification task.
+
+The strength of this approach is that it reflects how decisions are made in the power market. Market participants rarely rely on exact volatility estimates, but rather on whether expected volatility crosses a certain threshold, for example, whether a day is likely to be volatile or not. Knowing whether high volatility is likely can help them make more robust strategic decisions in advance.
+
+Zareipour et al. (2011, pp. 165-168) introduced a classification based approach to electricity price forecasting. The idea was to develop a tool that could indicate whether prices were likely to fall within a specific threshold, thereby enabling managers to base decisions on categorical outcomes rather than precise price values. The authors argue that for demand side management, it is often sufficient and more practical, to forecast categories such as "high" or "low" prices. Their results demonstrate that classification methods, particularly Support Vector Machines (SVM), can outperform traditional regression models, especially in aiding demand side management and grid optimization.
+
+Furthermore, as previously referenced, Sheybanivaziri et al. (2024, pp. 4-6) emphasize that while traditional forecasting models may perform well on average, they often struggle during periods of heightened volatility. These are precisely the conditions where accurate predictions are most critical. The authors argue that non linear classification models, particularly tree based methods, are better suited to capturing complex relationships and handling noisy data, both of which are common in high volatility environments. The study underscores the importance of detecting and forecasting extreme price spikes. As illustrated in “Standard Deviation of the price for 2020 to 2023” later displayed, electricity prices have exhibited significantly higher and more erratic spikes after 2021 compared to earlier periods, further motivating the use of advanced classification techniques to address recent market developments.
+
+This approach is more resilient to noisy real world data and outliers, which often compromise the accuracy of parametric models. As such, our method seeks to provide a more robust prediction of whether future days will be volatile, rather than attempting to predict precise volatility levels.
+
+### 7-day prediction horizon
+
+We have selected a 7-day prediction horizon, meaning the model predicts the volatility on the specific day that lies exactly 7 days ahead, to align with the operational and strategic planning needs of key market participants. These participants are power producers, retailers and hedging agents. While short term forecasts like day ahead or intraday tend to be more accurate, they are mainly useful for immediate trading decisions. In contrast, decisions related to hydropower dispatch, generation scheduling and maintenance planning typically require several days of lead time. Moreover, forward contracts and industry level power purchases in the Nord Pool market are often negotiated on weekly or monthly time frames, making a 7-day forecast more practically applicable to these actors.
+
+In addition, a weekly horizon allows the model to incorporate important temporal dynamics such as weather patterns, calendar effects and hydro power storage. These seasonal and calendar based factors are particularly influential in the Nordic power system, where electricity demand surges during colder periods and hydropower production is closely linked to inflow cycles and reservoir planning (Sheybanivaziri et al., 2024, pp. 22–23). Therefore, a 7-day forecast horizon strikes a balance between forecast usefulness, strategic relevance, and data driven seasonality capture.
+
+# Data
+
+We have collected electricity data from ENTSO-E and weather data from SeKlima. The electricity data primarily includes hourly prices from price zone N05. Prices are reported in EUR/MWh, while consumption is measured in MWh. Additionally, the dataset contains information on the potential amount of electricity stored in hydropower reservoirs each month. This variable is labeled as "storage" in the dataset. From SeKlima, we have gathered weather data related to wind and temperature conditions for Bergen area, from Florida weather station.
+
+Besides this we have computed summary statistics for the electricity price variable. These summary statistics contains the moving average for 7 and 30 days, as well as the rolling range, standard deviation and the range of the 3qr minus the 1qr. Some of these metric is also lagged 30 and 7 days.
+
+The classification is at a daily level so, the data is aggregated to a daily level.
+
+Seasonality is controlled by the use of the variables month and weekend. A dummy variable for the Russian invasion of Ukraine is included because of it's severe impact on the energy market in Europe.
+
+```{r}
+### Loading libraries --------
+library(tidyverse)
+library(pROC)
+library(glmnet)
+library(caret)
+library(randomForest)
+library(patchwork)
+```
+
+```{r, include=FALSE}
+### Loading price --------
+prices_files <- list.files(path = "price", pattern = "*.csv", full.names = T)
+
+prices_list <- lapply(prices_files, read_csv)
+
+names(prices_list) <- tools::file_path_sans_ext(basename(prices_files))
+
+prices <- bind_rows(prices_list) %>%
+  rename(
+    time = 1,
+    price = 4
+  ) %>%
+  as_tibble()
+
+prices <- prices %>%
+  separate(time, into = c("start_time", "end_time"), sep = " - ") %>%
+  mutate(
+    start_time = dmy_hms(start_time, tz = "Europe/Paris"),
+    end_time = dmy_hms(end_time, tz = "Europe/Paris"),
+    hour = floor_date(start_time, unit = "hour")
+  ) %>%
+  group_by(hour) %>%
+  summarise(price = mean(price, na.rm = T)) %>%
+  arrange(desc(hour))
+
+
+### Loading water storage --------
+water_files <- list.files(path = "water", pattern = "*.csv", full.names = T)
+
+water_list <- lapply(water_files, read_csv)
+
+names(water_list) <- tools::file_path_sans_ext(basename(water_files))
+
+filter_for_years <- function(df, name) {
+  number <- as.numeric(gsub(".*_(\\d+)_.*", "\\1", name))
+  filtered_df <- df[df[[2]] == 2000 + number, ]
+  return(filtered_df)
+}
+
+water_list <- lapply(seq_along(water_list), function(i) {
+  filter_for_years(water_list[[i]], names(water_list)[i])
+})
+
+water <- bind_rows(water_list) %>%
+  rename(
+    year = 2,
+    week = 3,
+    storage = 4
+  )
+
+water <- water %>%
+  arrange(year, week) %>%
+  select(-1) %>%
+  mutate(storage = as.numeric(storage)) %>%
+  fill(everything(), .direction = "down")
+
+### Loading weather --------
+temp <- read.csv2("temp_Bergen.csv") %>%
+  select(3, 4) %>%
+  rename(time = 1, temp = 2) %>%
+  mutate(
+    time = dmy_hm(time, tz = "Europe/Paris"),
+    temp = as.numeric(temp)
+  ) %>%
+  drop_na()
+
+wind <- read.csv2("wind_Bergen.csv") %>%
+  select(3, 4) %>%
+  rename(time = 1, wind = 2) %>%
+  mutate(
+    time = dmy_hm(time, tz = "Europe/Paris"),
+    wind = as.numeric(wind)
+  ) %>%
+  drop_na()
+```
+
+```{r}
+### Joining data --------
+prices <- prices %>%
+  rename(time = 1)
+
+temp_wind <- temp %>%
+  left_join(wind, by = "time")
+
+data <- prices %>%
+  left_join(temp_wind, by = "time") %>%
+  fill(everything(), .direction = "down") %>%
+  mutate(
+    year = year(time),
+    week = week(time)
+  )
+
+data <- data %>%
+  left_join(water, by = c("year", "week"))
+
+data <- data %>%
+  arrange(time) %>%
+  complete(time = seq(min(time), max(time) + hours(1), by = "hour")) %>%
+  filter(time < "2025-03-01 00:01:00") %>%
+  fill(everything(), .direction = "down")
+```
+
+```{r, include=FALSE}
+### Adding functions --------
+# These functions are later used for computing summary statistics
+
+rolling_sd <- function(index, prices, days) {
+  if (index < days * 24) {
+    return(NA)
+  }
+  return(sd(prices[(index - (days - 1) * 24):index], na.rm = TRUE))
+}
+
+moving_average <- function(index, prices, days) {
+  if (index < days * 24) {
+    return(NA)
+  }
+  return(mean(prices[(index - (days - 1) * 24):index], na.rm = TRUE))
+}
+
+rolling_range <- function(index, prices, days) {
+  if (index < days * 24) {
+    return(NA)
+  }
+  window_prices <- prices[(index - (days - 1) * 24):index]
+  return(max(window_prices, na.rm = TRUE) - min(window_prices, na.rm = TRUE))
+}
+
+rolling_iqr <- function(index, prices, days) {
+  if (index < days * 24) {
+    return(NA)
+  }
+  window_prices <- prices[(index - (days - 1) * 24):index]
+  q1 <- quantile(window_prices, 0.25, na.rm = TRUE)
+  q3 <- quantile(window_prices, 0.75, na.rm = TRUE)
+  return(q3 - q1)
+}
+
+rolling_median <- function(index, prices, days) {
+  if (index < days * 24) {
+    return(NA)
+  }
+  window_prices <- prices[(index - (days - 1) * 24):index]
+  return(median(window_prices, na.rm = TRUE))
+}
+```
+
+```{r}
+### Aggregating data --------
+data <- data %>%
+  mutate(
+    rolling_7_sd = map_dbl(row_number(), ~ rolling_sd(.x, price, 7)),
+    rolling_30_sd = map_dbl(row_number(), ~ rolling_sd(.x, price, 30)),
+    ma_7 = map_dbl(row_number(), ~ moving_average(.x, price, 7)),
+    ma_30 = map_dbl(row_number(), ~ moving_average(.x, price, 30)),
+    rolling_7_range = map_dbl(row_number(), ~ rolling_range(.x, price, 7)),
+    rolling_30_range = map_dbl(row_number(), ~ rolling_range(.x, price, 30)),
+    rolling_7_iqr = map_dbl(row_number(), ~ rolling_iqr(.x, price, 7)),
+    rolling_30_iqr = map_dbl(row_number(), ~ rolling_iqr(.x, price, 30)),
+    rolling_7_median = map_dbl(row_number(), ~ rolling_median(.x, price, 7)),
+    rolling_30_median = map_dbl(row_number(), ~ rolling_median(.x, price, 30))
+  )
+
+
+data <- data %>%
+  mutate(
+    month = month(time),
+    day_of_week = as.numeric(format(time, "%u")),
+    weekend = ifelse(day_of_week >= 6, 1, 0),
+    day = day(time)
+  ) %>%
+  drop_na()
+
+
+day_data <- data %>%
+  group_by(year, month, day) %>%
+  summarise(
+    day_of_week = mean(day_of_week, na.rm = T),
+    weekend = mean(weekend, na.rm = T),
+    mean_price = mean(price, na.rm = T),
+    sd_price = sd(price, na.rm = T),
+    median_price = median(price, na.rm = T),
+    range_price = max(price) - min(price),
+    iqr_price = quantile(price, 0.75) - quantile(price, 0.25),
+    mean_temp = mean(temp, na.rm = T),
+    sd_temp = sd(temp, na.rm = T),
+    mean_wind = mean(wind, na.rm = T),
+    sd_wind = sd(wind, na.rm = T),
+    storage = mean(storage, na.rm = T),
+    time = mean(time, na.rm = T),
+    rolling_7_sd = mean(rolling_7_sd, na.rm = T),
+    rolling_30_sd = mean(rolling_30_sd, na.rm = T),
+    ma_7 = mean(ma_7, na.rm = T),
+    ma_30 = mean(ma_30, na.rm = T),
+    rolling_7_range = mean(rolling_7_range, na.rm = T),
+    rolling_30_range = mean(rolling_30_range, na.rm = T),
+    rolling_7_iqr = mean(rolling_7_iqr, na.rm = T),
+    rolling_30_iqr = mean(rolling_30_iqr, na.rm = T),
+    rolling_7_median = mean(rolling_7_median, na.rm = T),
+    rolling_30_median = mean(rolling_30_median, na.rm = T),
+    .groups = "drop"
+  )
+
+forecast_horizon <- 7
+ukraine_war_date <- ymd_hms("2022-02-24 00:00:00")
+
+# The prefix 'd_' indicates that these variables are shifted to exclude future information,
+# preventing data leakage from the period we aim to forecast.
+
+day_data <- day_data %>%
+  mutate(
+    d_price = lag(mean_price, forecast_horizon),
+    d_sd_price = lag(sd_price, forecast_horizon),
+    d_median_price = lag(median_price, forecast_horizon),
+    d_range_price = lag(range_price, forecast_horizon),
+    d_iqr_price = lag(iqr_price, forecast_horizon),
+    d_rolling_7_sd = lag(rolling_7_sd, forecast_horizon),
+    d_rolling_30_sd = lag(rolling_30_sd, forecast_horizon),
+    d_ma_7 = lag(ma_7, forecast_horizon),
+    d_ma_30 = lag(ma_30, forecast_horizon),
+    d_temp = lag(mean_temp, forecast_horizon),
+    d_sd_temp = lag(sd_temp, forecast_horizon),
+    d_wind = lag(mean_wind, forecast_horizon),
+    d_sd_wind = lag(sd_wind, forecast_horizon),
+    d_storage = lag(storage, forecast_horizon),
+    d_rolling_7_range = lag(rolling_7_range, forecast_horizon),
+    d_rolling_30_range = lag(rolling_30_range, forecast_horizon),
+    d_rolling_7_iqr = lag(rolling_7_iqr, forecast_horizon),
+    d_rolling_30_iqr = lag(rolling_30_iqr, forecast_horizon),
+    d_rolling_7_median = lag(rolling_7_median, forecast_horizon),
+    d_rolling_30_median = lag(rolling_30_median, forecast_horizon),
+    year = as.character(year),
+    month = as.factor(month),
+    day = as.factor(day),
+    day_of_week = as.factor(day_of_week),
+    weekend = as.factor(weekend),
+    war = as.factor(if_else(time > ukraine_war_date, "Yes", "No"))
+  ) %>%
+  drop_na() %>%
+  select(sd_price, mean_price, time, year, month, weekend, war, starts_with("d_"))
+
+# Adding actual lagged variables
+day_data <- day_data %>%
+  mutate(
+    lag7_d_price = lag(d_price, 7),
+    lag30_d_price = lag(d_price, 30),
+    lag7_d_rolling_7_sd = lag(d_rolling_7_sd, 7),
+    lag30_d_roling_7_sd = lag(d_rolling_7_sd, 30),
+    lag7_d_rolling_30_sd = lag(d_rolling_30_sd, 7),
+    lag30_d_roling_30_sd = lag(d_rolling_30_sd, 30),
+    lag7_d_ma_7 = lag(d_ma_7, 7),
+    lag30_d_ma_7 = lag(d_ma_7, 30),
+    lag7_d_ma_30 = lag(d_ma_30, 7),
+    lag30_d_ma_30 = lag(d_ma_30, 30),
+  ) %>%
+  drop_na()
+
+day_data <- day_data %>%
+  mutate(season = case_when(
+    month %in% c("12", "1", "2") ~ "Winter",
+    month %in% c("3", "4", "5") ~ "Spring",
+    month %in% c("6", "7", "8") ~ "Summer",
+    month %in% c("9", "10", "11") ~ "Fall"
+  ))
+```
+
+We are splitting the data, into training and test data. The training data includes information from the years 2020 to 2023, while the test data covers the period from 2023 to March 2025.
+
+```{r}
+### Test and train split --------
+set.seed(123)
+
+day_data$year <- as.numeric(day_data$year)
+
+train <- day_data %>%
+  filter(year < 2023)
+
+ggplot(train, aes(x = time, y = sd_price)) +
+  geom_line() +
+  labs(
+    title = "Standard Devation of the price for 2020 to 2023",
+    x = "Time",
+    y = "Standard Deviation of Price"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+hist(train$sd_price)
+```
+
+As observed from the histogram above and the summary below, there is a wide range of standard deviations, although most of the values tend to be relatively low.
+
+```{r}
+
+summary(train$sd_price)
+
+train <- train %>%
+  mutate(high_vol = as.factor(ifelse(sd_price > 10, 1, 0))) %>%
+  select(-year, -mean_price, -sd_price)
+
+test <- day_data %>%
+  filter(year >= 2023) %>%
+  mutate(high_vol = as.factor(ifelse(sd_price > 10, 1, 0))) %>%
+  select(-year, -mean_price, -sd_price)
+
+
+table(train$high_vol)
+
+table(test$high_vol)
+```
+
+A standard deviation threshold of 10 is used to categorize days into either high volatility or low volatility. Here, 1 indicates high volatility, and 0 indicates low volatility. As a consequence of using 10 as the standard deviation threshold, our data is somewhat imbalanced, which may pose challenges for the machine learning model. Additionally, the training and test datasets have different ratios of high and low volatility days. This issue could be addressed using techniques like SMOTE, but addressing it is beyond the scope of this paper.
+
+# Models
+
+To predict whether a day is high or low volatility, we will use logistic regression, principal component analysis combined with logistic regression, Random Forest, and Support Vector Machines with a linear kernel. Wherever possible, time series cross validation will be used to ensure the data is appropriately prepared for testing.
+
+### Preprocessing
+
+```{r, include=FALSE}
+# Adding a table to store the results from the different models
+result_table <- tibble(
+  model = character(),
+  AUC = numeric(),
+  Kappa = numeric(),
+  TPR = numeric(),
+  TNR = numeric(),
+)
+
+# This function adds results for the different models
+add_result <- function(model_name, auc_value, kappa, sensitivity, specificity,
+                       tbl = result_table) {
+  new_row <- tibble(
+    AUC = auc_value,
+    Kappa = kappa,
+    model = model_name,
+    TPR = sensitivity,
+    TNR = specificity,
+  )
+
+  tbl <- bind_rows(tbl, new_row)
+
+  return(tbl)
+}
+```
+
+We optimize our models based on the Kappa statistic. While it is important to note that Kappa can encounter issues with skewed data, we find it a more reliable metric for optimization compared to simply using a threshold of 0.5 for classification (Jeni et al., 2013).
+
+Below is the fucntion for calculating the Cohen's Kappa:
+
+$$
+\kappa = \frac{p_o - p_e}{1 - p_e}
+$$
+
+$p_o = Accuracy$ , $p_e = Expected \ agreement \ by \ chance$
+
+```{r}
+### Kappa Optimization --------
+calculate_best_threshold <- function(probs, true_labels) {
+  calculate_kappa <- function(predictions, true_labels) {
+    confusion_matrix <- table(predictions, true_labels)
+    observed_accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+    expected_accuracy <- sum(rowSums(confusion_matrix) * colSums(confusion_matrix)) /
+      sum(confusion_matrix)^2
+    kappa <- (observed_accuracy - expected_accuracy) / (1 - expected_accuracy)
+    return(kappa)
+  }
+
+  thresholds <- seq(0, 1, by = 0.01)
+  best_threshold <- 0
+  best_kappa <- -Inf
+
+  for (threshold in thresholds) {
+    predictions <- ifelse(probs > threshold, 1, 0)
+    kappa <- calculate_kappa(predictions, true_labels)
+
+    if (kappa > best_kappa) {
+      best_kappa <- kappa
+      best_threshold <- threshold
+    }
+  }
+
+  cat("Best Threshold:", best_threshold, "\n")
+  return(best_threshold)
+}
+```
+
+### Logistic regression
+
+Logistic regression is a commonly used and straightforward approach to applying machine learning. By encoding the response variable as either 0 or 1, logistic regression can be employed to classify whether a day is likely to experience high volatility. The predicted value Y\^ represents a probability, where outcomes above 0.5 are typically classified as 1 (high volatility) and those below as 0 (low volatility). This simple and interpretable model serves as a baseline against which more advanced machine learning models can be compared in terms of predictive performance (James et al., 2023, pp. 133-135).
+
+$$ p(X) = \frac{e^{\beta_0 + \beta_1 X}}{1 + e^{\beta_0 + \beta_1 X}} $$
+
+$p(X)$ is the predicted probaility of a high volatility day
+
+$X$ is the explanatory variable
+
+$\beta_0$ is the intercept term.
+
+$\beta_1$ is the coefficient for the variable $X$
+
+```{r}
+### Logistic regression --------
+
+logic_model <- train(
+  high_vol ~ d_price + d_rolling_30_sd +
+    d_wind + d_temp + month + war + d_storage + weekend,
+  data = train,
+  method = "glm",
+  family = binomial
+)
+
+
+```
+
+In our model, we use a limited set of predictors to reduce the likelihood of multicollinearity. Among these variables, month and weekend are included to account for seasonality by capturing patterns across different time periods.
+
+```{r}
+summary(logic_model)
+```
+
+The regression from the training data reveals that the variables `d_price`, `d_rolling_30_sd`, `war` and `d_storage` and some `months` are statically significant.
+
+```{r}
+true_labels <- as.numeric(as.character(test$high_vol))
+
+probs <- predict(logic_model, test, type = "prob")
+
+best_threshold <- calculate_best_threshold(probs[, 2], true_labels)
+```
+
+```{r}
+test$high_vol <- factor(test$high_vol, levels = c(0, 1))
+logic_curve <- roc(test$high_vol, probs[, 2])
+print(auc(logic_curve))
+```
+
+The AUC value is 0.7, which is clearly better than chance.
+
+```{r}
+predictions <- ifelse(probs[, 2] > best_threshold, 1, 0)
+predictions <- as.factor(predictions)
+logic_cm <- confusionMatrix(predictions, test$high_vol, positive = "1")
+print(logic_cm)
+```
+
+The confusion matrix show us that the model has a accuracy of 66%. The TPR and TNR is 62% and 69% for the optimized threshold based on Kappa.
+
+```{r,  include=FALSE}
+result_table <- add_result(
+  "Logistic",
+  as.numeric(auc(logic_curve)),
+  logic_cm$overall["Kappa"],
+  logic_cm$byClass["Sensitivity"],
+  logic_cm$byClass["Specificity"],
+)
+```
+
+```{r}
+results <- test %>%
+  mutate(
+    logic_prediction = predictions,
+    logic_prob = probs[, 2],
+    high_vol = as.numeric(as.character(high_vol)),
+    logic_correct = case_when(
+      high_vol == 1 & logic_prediction == 1 ~ "TP",
+      high_vol == 1 & logic_prediction == 0 ~ "FN",
+      high_vol == 0 & logic_prediction == 0 ~ "TN",
+      high_vol == 0 & logic_prediction == 1 ~ "FP"
+    )
+  )
+```
+
+```{r}
+p1 <- ggplot(results, aes(x = time)) +
+  geom_point(aes(y = logic_prob, color = logic_correct), size = 1) +
+  scale_color_manual(
+    values = c("TP" = "blue", "TN" = "orange", "FP" = "red", "FN" = "black"),
+    name = "Class"
+  ) +
+  geom_hline(yintercept = best_threshold, linetype = "dashed", color = "black") +
+  labs(
+    title = "Logistic Probabilities & Accuracy",
+    x = "Time", y = "Predicted Probability"
+  ) +
+  theme_minimal()
+
+p2 <- ggplot(day_data %>% filter(year >= 2023), aes(x = time, y = sd_price)) +
+  geom_line() +
+  labs(
+    title = "Standard Deviation of the price for test dataset",
+    x = "Time",
+    y = "Standard Deviation of Price"
+  ) +
+  theme_minimal()
+
+combined_plot <- p1 / p2
+
+combined_plot
+```
+
+*The figure "Logistic Probabilities & Accuracy" shows the predicted probabilities over time, with coloring based on the classification it got. FN: False Negative, FP: False positive, TN: True negative and TP: True positive. The figure below shows the actual standard deviation over time.*
+
+The plot above shows that the predicted probabilities change noticeably with the seasons. This is expected, as seasonal variations influence both electricity demand and supply
+
+```{r}
+ggplot(results, aes(x = d_price, y = logic_prob, color = factor(high_vol))) +
+  geom_point(alpha = 0.8) +
+  labs(
+    y = "Predicted Probailities",
+    x = "Price",
+    color = "High Vol"
+  ) +
+  facet_wrap(~season) +
+  theme_minimal()
+```
+
+*The plot above shows the correlation between the electricity price and the predicted probability and is split into four different figures for each season. There is clearly a seasonal aspect of this and this plot is shown as a contrast to similar plot later in the paper.*
+
+### PCA and Logistic regression
+
+To support further use of logistic regression, we apply Principal Component Analysis (PCA) as an additional method for addressing multicollinearity. PCA introduces transformed features into the dataset by creating new variables that capture the underlying variation in the original data. These new variables aim to provide the linear model with a set of uncorrelated components that still explain most of the variance in the data. This addresses the issue of multicollinearity, where independent variables are highly correlated, which violates a key assumption in linear regression.
+
+From a theoretical standpoint, PCA can improve predictive performance in linear regression models, especially when many of the original variables are naturally correlated (James et al., 2023, pp. 497-498). This is the case in our dataset, where summary statistic variables from price variable naturally correltate. 
+
+Before implementing PCA, we scale the data to prevent the analysis from being biased toward variables with extreme ranges.
+
+```{r}
+### PCA --------
+
+non_numeric_columns <- c("weekend", "time", "high_vol", "month", "war", "season")
+
+scaled_train <- as.data.frame(scale(train[, !(names(train) %in% non_numeric_columns)]))
+
+scaled_test <- as.data.frame(scale(test[, !(names(test) %in% non_numeric_columns)]))
+
+pca_result_train <- prcomp(scaled_train, center = FALSE, scale. = FALSE)
+
+summary(pca_result_train)
+```
+
+Based in the summary of the PCA results we decide that 7 principal components is enough since it explains cumulative 90 % of the variance. `PC1` explains the absolute majority of the variance of of the explanatory variables. The next component only explains 8% of the variance where as the `PC1` explains 62%.
+
+```{r}
+rotation <- as.data.frame(pca_result_train$rotation)
+rotation <- rotation %>%
+  arrange(desc(PC1))
+
+rotation[1]
+```
+
+Above this, you can see what `PC1` contains in decreasing order. It is evident that `PC1` primarily represents price information. This indicates that this principal component is a blend of all the summary statistics related to price, and we expect it will be significant for both training and prediction.
+
+```{r}
+# PCA train dataset
+pca_train <- pca_result_train$x[, 1:7]
+
+factor_train <- train[, non_numeric_columns]
+
+pca_train <- cbind(pca_train, factor_train) %>%
+  as_tibble()
+
+# PCA test dataset
+
+# Transforming test data with the PCA from the train data
+pca_result_test <- predict(pca_result_train, newdata = scaled_test)
+
+pca_test <- pca_result_test[, 1:7]
+
+factor_test <- test[, non_numeric_columns]
+
+pca_test <- cbind(pca_test, factor_test) %>%
+  as_tibble()
+```
+
+We perform logistic regression using the transformed test data.
+
+```{r}
+### Logistic regression with PCA --------
+pca_model <- train(high_vol ~ . - time - season,
+  data = pca_train,
+  method = "glm",
+  family = binomial
+)
+summary(pca_model)
+```
+
+We observe that `PC1`, war and some months are statistically significant. This corresponds with the result from the train data for the first logistic regression. As previously noted, PC1 primarily captures summary statistic from the price variable.
+
+```{r}
+probs <- predict(pca_model, pca_test, type = "prob")
+
+pca_curve <- roc(test$high_vol, probs[, 2])
+print(auc(pca_curve))
+```
+
+```{r}
+best_threshold <- calculate_best_threshold(probs[, 2], true_labels)
+```
+
+```{r}
+predictions <- ifelse(probs[, 2] > best_threshold, 1, 0)
+predictions <- as.factor(predictions)
+pca_cm <- confusionMatrix(predictions, test$high_vol, positive = "1")
+print(pca_cm)
+```
+
+The TPR and TNR is 66% and 66% for the optimized threshold based on Kappa. The accuracy is at 66%
+
+```{r, include = FALSE}
+result_table <- add_result(
+  "PCA_Logistic",
+  as.numeric(auc(pca_curve)),
+  pca_cm$overall["Kappa"],
+  pca_cm$byClass["Sensitivity"],
+  pca_cm$byClass["Specificity"],
+)
+```
+
+```{r}
+results <- results %>%
+  mutate(
+    pca_prediction = predictions,
+    pca_prob = probs[, 2],
+    pca_correct = case_when(
+      high_vol == 1 & pca_prediction == 1 ~ "TP",
+      high_vol == 1 & pca_prediction == 0 ~ "FN",
+      high_vol == 0 & pca_prediction == 0 ~ "TN",
+      high_vol == 0 & pca_prediction == 1 ~ "FP"
+    )
+  )
+
+ggplot(results, aes(x = time)) +
+  geom_point(aes(y = pca_prob, color = pca_correct), size = 1) +
+  scale_color_manual(
+    values = c("TP" = "blue", "TN" = "orange", "FP" = "red", "FN" = "black"),
+    name = "Class"
+  ) +
+  geom_hline(yintercept = best_threshold, linetype = "dashed", color = "black") +
+  labs(
+    title = "PCA Probabilities & Accuracy",
+    x = "Time", y = "Predicted Probability"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+results$PC1 <- pca_test$PC1
+
+
+ggplot(results, aes(x = PC1, y = pca_prob, color = factor(high_vol))) +
+  geom_point(alpha = 0.8) +
+  labs(
+    y = "Predicted Probailities",
+    x = "PC1",
+    color = "High Vol"
+  ) +
+  facet_wrap(~season) +
+  theme_minimal()
+```
+
+*The figure above shows the correlation between the "PC1" and the predicted probability. They are split into four figures, one for each season, and the color shows us if the the given day had high volatility or not. This plot is shown to contrast with the earlier plot for the price.*
+
+We see that PC1 is more important to the prediction than price, and it has more "s" curve as expected from a logistic regression.
+
+```{r}
+### Time Series CV ----------
+
+folds <- list()
+
+total_obs <- nrow(train)
+
+
+fold_size <- ceiling(total_obs / 10)
+counter <- 1
+
+for (i in 5:9) {
+  test_start_index <- (i * fold_size)
+  test_end_index <- min((i + 1) * fold_size, total_obs)
+
+
+  train_indices <- 1:(test_start_index - 1)
+  test_indices <- test_start_index:test_end_index
+
+  folds[[counter]] <- list(train = train_indices, test = test_indices)
+
+
+  counter <- counter + 1
+}
+
+levels(train$high_vol) <- make.names(levels(train$high_vol))
+
+cv_control <- trainControl(
+  method = "cv",
+  index = lapply(folds, function(x) x$train),
+  indexOut = lapply(folds, function(x) x$test),
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
+```
+
+The time series cross validation is structured so that the first fold uses the initial 50% of the data for training and validates on the subsequent 10%. Each following fold expands the training set by 10% of the original data, while validation always performed on the following 10%, continuing this pattern until the end of the data set.
+
+### Random Forest
+
+For further analysis, we apply Random Forest to capture high variance using a more advanced algorithm compared to logistic regression. Random Forest offers a flexible yet powerful classification method. It works by constructing an ensemble of decision trees, where the final prediction is determined by the majority vote across the trees. This ensemble approach allows the model to capture both linear and non linear relationships in the data, making it more robust than individual decision trees.
+
+In addition to strong predictive capabilities, Random Forest models also provide insights into variable importance. This feature indicates which predictors contribute most to the model's decisions, offering valuable interpretability (James et al., 2023, pp. 343-345).
+
+```{r}
+### Random Forest ----------
+
+mtry_range <- seq(2, ncol(train) - 1, by = 1)
+
+tune_grid <- expand.grid(mtry = mtry_range)
+
+rf_model_tuned <- train(high_vol ~ . - time - season,
+  data = train,
+  method = "rf",
+  trControl = cv_control,
+  tuneGrid = tune_grid,
+  ntree = 100,
+  metric = "ROC"
+)
+
+print(rf_model_tuned$results)
+
+optimal_mtry <- rf_model_tuned$bestTune %>%
+  pull()
+
+print(optimal_mtry)
+```
+
+The ROC (AUC value) for the training set is quite low, falling below 60%. However, there is a considerable standard deviation in this measure. The optimal mtry is 3, meaning that three variables are selected for each split. The mtry was chosen with the use of time series cross validation.
+
+```{r}
+# Train the final Random Forest model with optimal mtry
+rf_final_model <- randomForest(high_vol ~ . - time - season,
+  data = train, ntree = 100,
+  mtry = optimal_mtry, importance = TRUE
+)
+
+importance_values <- importance(rf_final_model) %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "variable") %>%
+  arrange(MeanDecreaseGini)
+
+importance_values %>%
+  select(variable, MeanDecreaseGini)
+```
+
+The figure above shows the importance of each variable based on the Gini index. This model faces significant challenges in accurately identifying which variables are truly the most important. This limitation arises from the presence of multiple summary statistic variables derived from the price variable, and these are correlated. Such correlations make it difficult for the Random Forest model to effectively distinguish between these variables, leading to potential inaccuracies in assessing their individual importance.
+
+```{r}
+probs <- predict(rf_final_model, newdata = test, type = "prob")
+
+rf_curve <- roc(test$high_vol, probs[, 2])
+print(auc(rf_curve))
+```
+
+```{r}
+best_threshold <- calculate_best_threshold(probs[, 2], true_labels)
+```
+
+```{r}
+predictions <- ifelse(probs[, 2] > best_threshold, 1, 0)
+predictions <- as.factor(predictions)
+rf_cm <- confusionMatrix(predictions, test$high_vol, positive = "1")
+print(rf_cm)
+```
+
+The TPR and TNR is 73% and 57% for the optimized threshold based on Kappa. The accuracy is 63%
+
+```{r, include = FALSE}
+result_table <- add_result(
+  "RF",
+  as.numeric(auc(rf_curve)),
+  rf_cm$overall["Kappa"],
+  rf_cm$byClass["Sensitivity"],
+  rf_cm$byClass["Specificity"],
+)
+```
+
+```{r}
+results <- results %>%
+  mutate(
+    rf_prediction = predictions,
+    rf_prob = probs[, 2],
+    rf_correct = case_when(
+      high_vol == 1 & rf_prediction == 1 ~ "TP",
+      high_vol == 1 & rf_prediction == 0 ~ "FN",
+      high_vol == 0 & rf_prediction == 0 ~ "TN",
+      high_vol == 0 & rf_prediction == 1 ~ "FP"
+    )
+  )
+
+ggplot(results, aes(x = time)) +
+  geom_point(aes(y = rf_prob, color = rf_correct), size = 1) +
+  scale_color_manual(
+    values = c("TP" = "blue", "TN" = "orange", "FP" = "red", "FN" = "black"),
+    name = "Class"
+  ) +
+  geom_hline(yintercept = best_threshold, linetype = "dashed", color = "black") +
+  labs(
+    title = "Random Forest Probabilities & Accuracy",
+    x = "Time", y = "Predicted Probability"
+  ) +
+  theme_minimal()
+```
+
+As shown above the Random Forest model predict probabilities that are low and exhibit less seasonality compared to both the PCA and logistic regression models.
+
+### Support Vector Machine - with Linear Kernel
+
+Support Vector Machines (SVM) aim to classify outcomes using a supervised learning algorithm. The core idea of SVM is to identify a hyperplane that maximizes the margin between different classes in the feature space. Maximizing the margin helps the model generalize better to new data.
+
+SVM can be applied in both linear and non linear settings. Through the kernel functions, such as polynomial and radial basis function kernels, it is capable of capturing complex, non linear relationships. This makes SVM a powerful tool, particularly well suited for high dimensional datasets, due to its flexibility and ability to handle non linearly separable data (James et al., 2023, pp. 368-370, 380-384). In this paper, however, we limit the analysis to the linear kernel, as the dataset is not high-dimensional and is therefore less likely to benefit from the added complexity of non-linear kernels.
+
+```{r}
+### Support Vector Machine - with Linear Kernel ----------
+
+scaled_train <- cbind(scaled_train, factor_train)
+scaled_test <- cbind(scaled_test, factor_test)
+```
+
+The data used for training the SVM must be scaled because variables with higher values could otherwise disproportionately influence the model.
+
+The variables for the support vector machine with linear kernel is chosen by the variables that was significant in the logistic regression.
+
+```{r}
+levels(scaled_train$high_vol) <- make.names(levels(scaled_train$high_vol))
+
+lsvm_model_cv <- train(
+  high_vol ~ d_price + d_rolling_30_sd + month + war + d_wind + d_storage,
+  data = scaled_train,
+  method = "svmLinear",
+  trControl = cv_control,
+  metric = "ROC",
+  tuneGrid = expand.grid(C = c(0.01, 0.1, 1, 10))
+)
+
+print(lsvm_model_cv$results)
+print(lsvm_model_cv$bestTune)
+
+```
+
+The optimal tuning parameter is a cost value of 10, selected through time series cross validation.
+
+```{r}
+lsvm_probs <- predict(lsvm_model_cv, newdata = scaled_test, type = "prob")
+
+lsvm_curve <- roc(test$high_vol, lsvm_probs[, 2])
+
+print(auc(lsvm_curve))
+```
+
+```{r}
+best_threshold <- calculate_best_threshold(lsvm_probs[, 2], true_labels)
+```
+
+```{r}
+lsvm_predictions <- ifelse(lsvm_probs[, 2] > best_threshold, 1, 0)
+lsvm_predictions <- as.factor(lsvm_predictions)
+lsvm_cm <- confusionMatrix(lsvm_predictions, test$high_vol, positive = "1")
+print(lsvm_cm)
+```
+
+The TPR and TNR is 73% and 62% for the optimized threshold based on Kappa. The accuracy is 66%.
+
+```{r, include=FALSE}
+result_table <- add_result(
+  "LSVM",
+  as.numeric(auc(lsvm_curve)),
+  lsvm_cm$overall["Kappa"],
+  lsvm_cm$byClass["Sensitivity"],
+  lsvm_cm$byClass["Specificity"],
+)
+```
+
+```{r}
+results <- results %>%
+  mutate(
+    lsvm_prediction = lsvm_predictions,
+    lsvm_prob = lsvm_probs[, 2],
+    lsvm_correct = case_when(
+      high_vol == 1 & lsvm_prediction == 1 ~ "TP",
+      high_vol == 1 & lsvm_prediction == 0 ~ "FN",
+      high_vol == 0 & lsvm_prediction == 0 ~ "TN",
+      high_vol == 0 & lsvm_prediction == 1 ~ "FP"
+    )
+  )
+
+ggplot(results, aes(x = time)) +
+  geom_point(aes(y = lsvm_prob, color = lsvm_correct), size = 1) +
+  scale_color_manual(
+    values = c("TP" = "blue", "TN" = "orange", "FP" = "red", "FN" = "black"),
+    name = "Class"
+  ) +
+  geom_hline(yintercept = best_threshold, linetype = "dashed", color = "black") +
+  labs(
+    title = "Linear SVM Probabilities & Accuracy",
+    x = "Time", y = "Predicted Probability"
+  ) +
+  theme_minimal()
+```
+
+SVM has a greater range in its predictions and the seasonality is clearly shows.
+
+# Results
+
+```{r}
+plot(logic_curve, col = "blue", main = "ROC Curves")
+
+lines(pca_curve, col = "red")
+
+lines(rf_curve, col = "green")
+
+lines(lsvm_curve, col = "black")
+
+legend("bottomright",
+  legend = c("Logistic", "PCA", "Random Forest", "SVM"),
+  col = c("blue", "red", "green", "black"), lty = 1
+)
+```
+
+```{r}
+result_table %>% arrange(desc(AUC))
+```
+
+As seen in descending order of performance based on AUC, the models are ranked as follows – PCA, logistic regression, SVM and Random Forest. According to these results, PCA appears to be the most accurate model for predicting high volatility, as reflected in its ROC curve and the highest accumulated AUC value. However, the visual ROC curves for all models show substantial overlap, suggesting no clear difference between the models.  
+
+While PCA achieved the highest AUC score, the SVM model obtained the highest Cohen’s Kappa value, 0.333 vs 0.315. Unlike AUC, which evaluates a model’s ability to rank predictions regardless of classification threshold, Kappa reflects the agreement between predicted and actual classes at a specific threshold, adjusted for chance. This suggests that, despite similar overall discriminative performance, the SVM may produce slightly more reliable class predictions under the chosen threshold. Random Forest, by contrast, achieved the lowest Kappa score of 0.275, indicating weaker agreement.As noted earlier in the paper, Kappa is more sensitive to class imbalance, and this should be considered when interpreting the relative performance of the models. 
+
+Overall, the models achieve Kappa scores between 0.275 and 0.333, indicating a modest but meaningful ability to predict high volatility days beyond random chance. Given the limited variables, primarily price metrics, weather data, and water storage levels this level of performance suggests that the models capture some useful signal for seven day ahead volatility classification.
+
+# Discussion
+
+Although both Random Forest and Support Vector Machine are theoretically better suited to capture complex, non linear relationships, the dataset used in this study may lack the necessary feature complexity for these models to fully realize their potential. Most variables consist of summary statistics derived from the electricity price, supplemented by a limited selection of weather and hydro storage indicators. Since we only use a few different sources of data, the models have a limited foundation for detecting more complex patterns and relationships. As a result, the more advanced algorithms like Random Forest and Support Vector Machines may be underperforming in this setting.
+
+By contrast, Principal Component Analysis enhances logistic regression not by increasing complexity but by addressing the problem of multicollinearity. Given the limited diversity in variables, it is consistent with theoretical expectations that PCA enhanced logistic regression performs better than the more complex models in this case. Its relative simplicity, along with its ability to combine highly correlated variables into a smaller set of independent components, makes it well suited for the structure of the current dataset.
+
+To better support and evaluate models such as RF and SVM, it would be essential to broaden the dataset. Future research should aim to incorporate more diverse and relevant features. This could include data from all bidding zones in the Nord Pool electricity market, along with gas, oil, and CO2 prices, which are key inputs to electricity pricing. Moreover, the inclusion of historical weather forecasts and predicted hydro reservoir levels could further enrich the data foundation. Such additions would likely allow more complex models to better capture the underlying drivers of volatility and improve both predictive performance across model types.
+
+# Conclusion
+
+This paper explores how machine learning can help predict price volatility in the NO5 bidding zone in Norway. Understanding future volatility is important for making good decisions in the power market. Instead of predicting exact prices, we use a classification method to find out if future price volatility will be high or low. This is more useful for real world decisions, where companies often act when volatility passes certain levels.
+
+We compare different machine learning models. Although complex models like Random Forest and Support Vector Machines are often strong in theory, our results show that a simpler model, logistic regression with Principal Component Analysis, gives better results for our dataset. This is likely because the dataset has limited information, and simpler models help reduce problems like multicollinearity. In this case, reducing the number of features is more helpful than using more advanced models.
+
+Our results show that machine learning can be a useful tool for predicting price volatility. If companies know when high volatility is likely, they can plan better, utilize resources more efficiently, and mitigate risk. This is important for producers, retailers, and companies that manage financial risk. Future research should look into improving the input data and testing new methods to make predictions even more accurate in a changing electricity market.
+
+# Sources
+
+James, G., Witten, D., Hastie, T., & Tibshirani, R. (2023). *An introduction to statistical learning with applications in R*(2nd ed., corrected reprint). Springer. <https://www.statlearning.com/>
+
+Jeni, L. A., Cohn, J. F., & De La Torre, F. (2013). Facing imbalanced data: Recommendations for the use of performance metrics. *2013 Humaine Association Conference on Affective Computing and Intelligent Interaction*, 245–251. <https://doi.org/10.1109/ACII.2013.47>
+
+Lijesen, M. G. (2007). The real-time price elasticity of electricity. *Energy Economics*, 29(2), 249–258. <https://doi.org/10.1016/j.eneco.2006.08.008>
+
+Sheybanivaziri, S., Le Dréau, J., & Kazmi, H. (2024). *Forecasting price spikes in day-ahead electricity markets: Techniques, challenges, and the road ahead* (Discussion Paper FOR 1/2024). Norwegian School of Economics (NHH). <https://openaccess.nhh.no/nhh-xmlui/bitstream/handle/11250/3112109/0124.pdf>
+
+Zareipour, H., Bhattacharya, K., & Canizares, C. A. (2011). Electricity market price volatility: The case of Ontario. *Energy Policy*, 39(3), 165–177. <https://doi.org/10.1016/j.enpol.2010.10.006>
